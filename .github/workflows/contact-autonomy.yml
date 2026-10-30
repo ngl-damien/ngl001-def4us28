@@ -1,29 +1,84 @@
 name: CONTACT autonomy stepwire
+
 on:
   workflow_dispatch:
+    inputs:
+      authorize_publication:
+        description: "Authorize this manual run to publish the CONTACT ledger, after the repository Founder Gate is explicitly set to ALLOW."
+        type: boolean
+        required: true
+        default: false
   schedule:
     - cron: '*/5 * * * *'
   push:
     paths:
       - 'contact/runtime.py'
+      - 'contact/publication_gate.py'
+      - 'contact/test_publication_gate.py'
       - '.github/workflows/contact-autonomy.yml'
+
 permissions:
-  contents: write
+  contents: read
+
 concurrency:
   group: contact-autonomy
   cancel-in-progress: false
+
 jobs:
-  stepwire:
+  observe:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.founder_gate.outputs.allow }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test CONTACT publication gate
+        run: python -m unittest discover -s contact -p 'test_*.py'
+
       - name: Execute one evidence-bearing transition
         run: python contact/runtime.py
-      - name: Persist evidence and state
+
+      - name: Evaluate Founder publication gate
+        id: founder_gate
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          CONTACT_AUTHORIZE_PUBLICATION: ${{ inputs.authorize_publication }}
+        run: python contact/publication_gate.py
+
+      - name: Package observation for authorized publication
+        if: steps.founder_gate.outputs.allow == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: contact-observation-${{ github.run_id }}
+          path: |
+            contact/state.json
+            contact/ledger.jsonl
+          retention-days: 1
+
+  publish:
+    needs: observe
+    if: needs.observe.outputs.publish == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download explicitly authorized observation
+        uses: actions/download-artifact@v4
+        with:
+          name: contact-observation-${{ github.run_id }}
+          path: contact
+
+      - name: Commit and push authorized observation
         run: |
           git config user.name 'NGL CONTACT'
           git config user.email 'contact@users.noreply.github.com'
           git add contact/state.json contact/ledger.jsonl
           git diff --cached --quiet && exit 0
-          git commit -m 'contact: persist autonomous observation'
-          git push
+          git commit -m 'contact: persist founder-authorized observation'
+          git push origin HEAD:main
