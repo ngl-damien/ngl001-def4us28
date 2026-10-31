@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ledger_store import (
     LedgerIntegrityError,
@@ -167,6 +168,12 @@ class ContactLedgerStoreTests(unittest.TestCase):
         state["enabled"] = "false"
         with self.assertRaisesRegex(LedgerIntegrityError, "must be a boolean"):
             reconcile_state(state, [])
+
+    def test_new_ledger_file_syncs_parent_directory(self):
+        with patch("ledger_store.os.fsync", wraps=os.fsync) as sync:
+            self.append(None)
+        expected = 2 if os.name == "posix" else 1
+        self.assertEqual(sync.call_count, expected)
 
     def test_append_rejects_a_stale_writer(self):
         self.append(None)
