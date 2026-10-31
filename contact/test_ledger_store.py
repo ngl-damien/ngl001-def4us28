@@ -120,7 +120,7 @@ class ContactLedgerStoreTests(unittest.TestCase):
             read_events(self.ledger_path)
 
     def test_rejects_a_validly_hashed_but_forked_event(self):
-        first = self.append(None)
+        self.append(None)
         fork = seal_event(observation("f" * 64, marker="fork"), expected_previous="f" * 64)
         with self.ledger_path.open("a", encoding="utf-8") as ledger:
             ledger.write(json.dumps(fork, sort_keys=True) + "\n")
@@ -134,10 +134,26 @@ class ContactLedgerStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(LedgerIntegrityError, "incomplete line"):
             read_events(self.ledger_path)
 
-    def test_rejects_duplicate_json_keys(self):
+    def test_rejects_duplicate_json_keys_in_ledger(self):
         self.ledger_path.write_text('{"actor":"a","actor":"b"}\n', encoding="utf-8")
         with self.assertRaisesRegex(LedgerIntegrityError, "duplicate JSON"):
             read_events(self.ledger_path)
+
+    def test_load_state_rejects_duplicate_json_keys(self):
+        self.state_path.write_text(
+            '{"schema":"ngl.contact.state.v1","enabled":true,"enabled":false}\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(LedgerIntegrityError, "duplicate JSON"):
+            load_state(self.state_path)
+
+    def test_load_state_rejects_wrong_schema(self):
+        self.state_path.write_text(
+            json.dumps({"schema": "ngl.contact.state.v0", "enabled": True}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(LedgerIntegrityError, "schema is invalid"):
+            load_state(self.state_path)
 
     def test_rejects_state_pointer_outside_the_retained_ledger(self):
         first = self.append(None)
