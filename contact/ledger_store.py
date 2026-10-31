@@ -76,6 +76,17 @@ def _validate_event(event, expected_previous, line_number):
         raise LedgerIntegrityError(f"{label} hash does not match its contents")
 
 
+def _fsync_directory(directory_path):
+    """Persist a directory entry on platforms that support directory fsync."""
+    if os.name != "posix":
+        return
+    descriptor = os.open(directory_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def load_state(path):
     path = Path(path)
     if path.is_symlink():
@@ -201,23 +212,26 @@ def append_event(path, event, expected_previous):
     if actual_previous != expected_previous:
         raise LedgerIntegrityError("CONTACT ledger changed before append")
 
+    created = not path.exists()
     sealed = seal_event(event, expected_previous)
     payload = (json.dumps(sealed, sort_keys=True) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags, 0o644)
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short CONTACT ledger write")
+                view = view[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        if created:
+            _fsync_directory(path.parent)
     except OSError as error:
-        raise LedgerIntegrityError("CONTACT ledger could not be opened for append") from error
-    try:
-        view = memoryview(payload)
-        while view:
-            written = os.write(descriptor, view)
-            if written <= 0:
-                raise OSError("short CONTACT ledger write")
-            view = view[written:]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+        raise LedgerIntegrityError("CONTACT ledger append could not be committed durably") from error
     return sealed
 
 
@@ -245,12 +259,7 @@ def write_state_atomic(path, state):
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
-        if os.name == "posix":
-            directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+        _fsync_directory(path.parent)
     except OSError as error:
         raise LedgerIntegrityError("CONTACT state could not be committed atomically") from error
     finally:
