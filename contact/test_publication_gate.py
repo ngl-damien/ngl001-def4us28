@@ -6,12 +6,14 @@ from publication_gate import publication_decision
 class PublicationDecisionTests(unittest.TestCase):
     def setUp(self):
         self.allowed_state = {
+            "schema": "ngl.contact.state.v1",
             "enabled": True,
             "founder_gate": {
                 "external_mutation": "ALLOW_WITH_EXPLICIT_AUTHORIZATION"
             },
         }
         self.denied_state = {
+            "schema": "ngl.contact.state.v1",
             "enabled": True,
             "founder_gate": {
                 "external_mutation": "DENY_WITHOUT_EXPLICIT_AUTHORIZATION"
@@ -46,6 +48,26 @@ class PublicationDecisionTests(unittest.TestCase):
         self.assertEqual(
             publication_decision(self.allowed_state, "workflow_dispatch", "true"),
             (True, "EXPLICIT_MANUAL_AUTHORIZATION"),
+        )
+
+    def test_missing_or_wrong_state_schema_fails_closed(self):
+        missing = dict(self.allowed_state)
+        missing.pop("schema")
+        wrong = {**self.allowed_state, "schema": "ngl.contact.state.v0"}
+        self.assertEqual(
+            publication_decision(missing, "workflow_dispatch", "true"),
+            (False, "STATE_INVALID"),
+        )
+        self.assertEqual(
+            publication_decision(wrong, "workflow_dispatch", "true"),
+            (False, "STATE_INVALID"),
+        )
+
+    def test_enabled_flag_must_be_a_boolean(self):
+        malformed = {**self.allowed_state, "enabled": "false"}
+        self.assertEqual(
+            publication_decision(malformed, "workflow_dispatch", "true"),
+            (False, "STATE_INVALID"),
         )
 
     def test_disabled_or_malformed_state_fails_closed(self):
