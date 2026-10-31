@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ledger_store import LedgerIntegrityError, STATE_SCHEMA, load_state
+
 
 def publication_decision(
     state: Any,
@@ -17,9 +19,11 @@ def publication_decision(
     This enforces the existing founder_gate declaration; it is not a
     cryptographic identity verifier or a substitute for GitHub account security.
     """
-    if not isinstance(state, dict):
+    if not isinstance(state, dict) or state.get("schema") != STATE_SCHEMA:
         return False, "STATE_INVALID"
-    if state.get("enabled") is not True:
+    if type(state.get("enabled")) is not bool:
+        return False, "STATE_INVALID"
+    if state["enabled"] is not True:
         return False, "CONTACT_DISABLED"
 
     founder_gate = state.get("founder_gate")
@@ -41,8 +45,10 @@ def publication_decision(
 def main() -> int:
     state_path = Path(__file__).resolve().with_name("state.json")
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # Reuse the strict state reader: duplicate keys, wrong schema, a
+        # non-boolean enabled flag, or a symlink all fail closed.
+        state = load_state(state_path)
+    except LedgerIntegrityError:
         state = None
 
     allowed, reason = publication_decision(
