@@ -13,7 +13,9 @@ on:
   push:
     paths:
       - 'contact/runtime.py'
+      - 'contact/ledger_store.py'
       - 'contact/publication_gate.py'
+      - 'contact/test_ledger_store.py'
       - 'contact/test_publication_gate.py'
       - '.github/workflows/contact-autonomy.yml'
 
@@ -34,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test CONTACT publication gate
+      - name: Test CONTACT publication and ledger integrity
         run: python -m unittest discover -s contact -p 'test_*.py'
 
       - name: Execute one evidence-bearing transition
